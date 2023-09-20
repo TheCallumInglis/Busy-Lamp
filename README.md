@@ -1,9 +1,9 @@
 # Busy Lamp  
 A teams presence indicator for ESP8266.  
 
-Utilise the Microsoft Graph API to fetch user presence information and display it with Neopixels.
+Utilise the Microsoft Graph API to fetch user presence information and display it with Neopixels.  
 
-## Usage  
+## Usage  
 `getAvailability()` handles user authentication and returns user's availability as a string. Use the output of this function as you desire.
 
 Possible return values are:  

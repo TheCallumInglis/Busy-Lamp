@@ -1,10 +1,13 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
+#include <FastLED.h>
 
 #include "Secret.h"
+#include "Config.h"
 
 const size_t MAX_CONTENT_SIZE = 6144;
+CRGB leds[NUM_LEDS];
 
 WiFiClientSecure wifiClient;
 HTTPClient httpClient;
@@ -96,7 +99,7 @@ char* getUserPresence(char* accessToken) {
   char* authorizationHeader = (char*)malloc(headerLength);
   if (!authorizationHeader) {
     Serial.println("Failed to allocate memory for the header");
-    return;
+    return nullptr;
   }
   snprintf(authorizationHeader, headerLength, "Bearer %s", accessToken);
 
@@ -109,14 +112,14 @@ char* getUserPresence(char* accessToken) {
 
   if (httpCode != HTTP_CODE_OK) {
     Serial.print("Failed! HTTP response code: "); Serial.println(httpCode);
-    return;
+    return nullptr;
   }
 
   // Handle Response
   DynamicJsonDocument* doc = strToJson(httpClient);
 
   if (!doc) {
-    return;
+    return nullptr;
   }
 
   char* availability = strdup((*doc)["availability"]); // Take copy of availability
@@ -124,8 +127,8 @@ char* getUserPresence(char* accessToken) {
 
   delete doc; // Housekeeping
 
-  Serial.print("Availability: "); Serial.print(availability);
-  Serial.print(", Activity: "); Serial.println(activity);
+  // Serial.print("Availability: "); Serial.print(availability);
+  // Serial.print(", Activity: "); Serial.println(activity);
 
   return availability;
 }
@@ -144,6 +147,20 @@ bool setupWifi() {
   wifiClient.setInsecure();
   Serial.println(" Connected!");
   return true;
+}
+
+void setupLED() {
+  FastLED.addLeds<LED_TYPE, LED_PIN, LED_COLOUR_ORDER>(leds, NUM_LEDS);
+  FastLED.setBrightness(LED_BRIGHTNESS);
+}
+
+void setLED(CRGB colour) {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = colour;
+  }
+
+  FastLED.show();
+  FastLED.delay(10);
 }
 
 DynamicJsonDocument* strToJson(HTTPClient& httpClient) {
@@ -167,16 +184,39 @@ DynamicJsonDocument* strToJson(HTTPClient& httpClient) {
 char* getAvailability() {
   char* accessToken = getOAuthToken(true);
   char* availability = getUserPresence(accessToken);
+
+  return availability;
+}
+
+CRGB getAvailabilityColour(const char* availability) {
+  if (strcmp(availability, "Available") == 0) {
+    return CRGB::LimeGreen;
+  } else if (strcmp(availability, "Busy") == 0) {
+    return CRGB::DarkMagenta;
+  } else if (strcmp(availability, "DoNotDisturb") == 0) {
+    return CRGB::Red;
+  } else if (strcmp(availability, "BeRightBack") == 0 || strcmp(availability, "Away") == 0) {
+    return CRGB::Orange;
+  } else if (strcmp(availability, "Offline") == 0) {
+    return CRGB::Black;
+  } else {
+    return CRGB::Black;  // Default case
+  }
 }
 
 void setup() {
   Serial.begin(115200);
-
   setupWifi();
-  getAvailability();
+  setupLED();
 }
 
 
 void loop() {
+  const char* availability = getAvailability();
+  Serial.println(availability);
 
+  CRGB colour = getAvailabilityColour(availability);
+  setLED(colour);
+
+  delay(2000);
 }
