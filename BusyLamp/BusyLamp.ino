@@ -12,11 +12,20 @@ CRGB leds[NUM_LEDS];
 WiFiClientSecure wifiClient;
 HTTPClient httpClient;
 
+char* accessToken = nullptr;
+
 /** OAuth Start **/
-char* getOAuthToken(bool retry) {
+char* getOAuthToken(bool reAuth = false) {
   // TODO Check we have wifi
 
-  Serial.println("Requesting OAuth Token... ");
+  // We already have an access token and not wanting it refreshed
+  if (accessToken != nullptr && !reAuth) {
+    Serial.println("Using Existing Access Token");
+    return accessToken; 
+  }
+
+  // Otherwise request new token
+  Serial.println("Requesting New OAuth Token... ");
   char* oAuthStr = buildOAuthString(MS_RESOURCE, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_USER, MS_PASS);
 
   wifiClient.setInsecure();
@@ -28,12 +37,6 @@ char* getOAuthToken(bool retry) {
 
   if (httpCode != HTTP_CODE_OK) {
     Serial.print("Failed! HTTP response code: "); Serial.println(httpCode);
-
-    if (retry) {
-      return getOAuthToken(false); // Try once more
-    }
-
-    Serial.println("Failed. Giving Up.");
     return nullptr;  
   }
 
@@ -81,17 +84,20 @@ char* readOAuthResponse() {
     return nullptr;
   }
 
-  char* access_token = strdup((*doc)["access_token"]);
+  accessToken = strdup((*doc)["access_token"]);
   delete doc; // Housekepping
 
   Serial.println("Got Access Token");
-  return access_token;
+  return accessToken;
 }
 /** OAuth End **/
 
 /** User Presence Start **/
-char* getUserPresence(char* accessToken) {
+char* getUserPresence() {
   // TODO Check we have wifi
+
+  // TODO Check if we have token
+
   Serial.println("Getting User Presence...");
 
   // Calculate the total length needed for the Authorization header
@@ -112,6 +118,13 @@ char* getUserPresence(char* accessToken) {
 
   if (httpCode != HTTP_CODE_OK) {
     Serial.print("Failed! HTTP response code: "); Serial.println(httpCode);
+
+    if (httpCode == HTTP_CODE_UNAUTHORIZED) {
+      Serial.println("Unathorized, refreshing token...");
+      getOAuthToken(true); // Refresh Token
+      return getUserPresence();
+    }
+
     return nullptr;
   }
 
@@ -182,8 +195,8 @@ DynamicJsonDocument* strToJson(HTTPClient& httpClient) {
 /** Helpers End **/
 
 char* getAvailability() {
-  char* accessToken = getOAuthToken(true);
-  char* availability = getUserPresence(accessToken);
+  getOAuthToken();
+  char* availability = getUserPresence();
 
   return availability;
 }
@@ -206,17 +219,19 @@ CRGB getAvailabilityColour(const char* availability) {
 
 void setup() {
   Serial.begin(115200);
+
   setupWifi();
   setupLED();
 }
 
-
 void loop() {
+  // Get Status
   const char* availability = getAvailability();
-  Serial.println(availability);
+  Serial.print("Availability: "); Serial.println(availability);
 
+  // Update Colour
   CRGB colour = getAvailabilityColour(availability);
   setLED(colour);
 
-  delay(2000);
+  delay(5000);
 }
