@@ -17,6 +17,7 @@ char* accessToken = nullptr;
 /** OAuth Start **/
 char* getOAuthToken(bool reAuth = false) {
   // TODO Check we have wifi
+  Serial.print("Authenticating... ");
 
   // We already have an access token and not wanting it refreshed
   if (accessToken != nullptr && !reAuth) {
@@ -25,7 +26,7 @@ char* getOAuthToken(bool reAuth = false) {
   }
 
   // Otherwise request new token
-  Serial.println("Requesting New OAuth Token... ");
+  Serial.print("Requesting New OAuth Token... ");
   char* oAuthStr = buildOAuthString(MS_RESOURCE, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_USER, MS_PASS);
 
   wifiClient.setInsecure();
@@ -36,11 +37,22 @@ char* getOAuthToken(bool reAuth = false) {
   free(oAuthStr); // Housekeeping
 
   if (httpCode != HTTP_CODE_OK) {
-    Serial.print("Failed! HTTP response code: "); Serial.println(httpCode);
+    Serial.println("Failed! HTTP response code: "); Serial.println(httpCode);
     return nullptr;  
   }
+  
+  DynamicJsonDocument* doc = strToJson(httpClient);
 
-  return readOAuthResponse(); // Gets Access Token
+  if (!doc) {
+    Serial.println("Failed to parse JSON response");
+    return nullptr;
+  }
+
+  accessToken = strdup((*doc)["access_token"]);
+  delete doc; // Housekepping
+
+  Serial.println("Got Access Token");
+  return accessToken;
 }
 
 /**
@@ -75,30 +87,13 @@ char* buildOAuthString(const char* msResource, const char* msClientID, const cha
 
   return oAuthStr;
 }
-
-char* readOAuthResponse() {
-  DynamicJsonDocument* doc = strToJson(httpClient);
-
-  if (!doc) {
-    Serial.println("Failed to parse JSON response");
-    return nullptr;
-  }
-
-  accessToken = strdup((*doc)["access_token"]);
-  delete doc; // Housekepping
-
-  Serial.println("Got Access Token");
-  return accessToken;
-}
 /** OAuth End **/
 
 /** User Presence Start **/
 char* getUserPresence() {
   // TODO Check we have wifi
 
-  // TODO Check if we have token
-
-  Serial.println("Getting User Presence...");
+  Serial.print("Getting User Presence... ");
 
   // Calculate the total length needed for the Authorization header
   size_t headerLength = strlen("Bearer ") + strlen(accessToken) + 1;
@@ -116,15 +111,14 @@ char* getUserPresence() {
   int httpCode = httpClient.GET();
   free(authorizationHeader); // Housekeeping
 
+  if (httpCode == HTTP_CODE_UNAUTHORIZED) {
+    Serial.println("Unathorised, refreshing token...");
+    getOAuthToken(true); // Refresh Token
+    return getUserPresence();
+  }
+
   if (httpCode != HTTP_CODE_OK) {
     Serial.print("Failed! HTTP response code: "); Serial.println(httpCode);
-
-    if (httpCode == HTTP_CODE_UNAUTHORIZED) {
-      Serial.println("Unathorized, refreshing token...");
-      getOAuthToken(true); // Refresh Token
-      return getUserPresence();
-    }
-
     return nullptr;
   }
 
@@ -132,17 +126,14 @@ char* getUserPresence() {
   DynamicJsonDocument* doc = strToJson(httpClient);
 
   if (!doc) {
+    Serial.println("Failed to parse response");
     return nullptr;
   }
 
   char* availability = strdup((*doc)["availability"]); // Take copy of availability
-  char* activity = strdup((*doc)["activity"]); // Take copy of activity
+  // char* activity = strdup((*doc)["activity"]); // Take copy of activity
 
   delete doc; // Housekeeping
-
-  // Serial.print("Availability: "); Serial.print(availability);
-  // Serial.print(", Activity: "); Serial.println(activity);
-
   return availability;
 }
 /** User Presence End **/
@@ -165,9 +156,10 @@ bool setupWifi() {
 void setupLED() {
   FastLED.addLeds<LED_TYPE, LED_PIN, LED_COLOUR_ORDER>(leds, NUM_LEDS);
   FastLED.setBrightness(LED_BRIGHTNESS);
+  setLEDColour(CRGB::Black); // i.e. off
 }
 
-void setLED(CRGB colour) {
+void setLEDColour(CRGB colour) {
   for (int i = 0; i < NUM_LEDS; i++) {
     leds[i] = colour;
   }
@@ -204,9 +196,7 @@ char* getAvailability() {
 CRGB getAvailabilityColour(const char* availability) {
   if (strcmp(availability, "Available") == 0) {
     return CRGB::LimeGreen;
-  } else if (strcmp(availability, "Busy") == 0) {
-    return CRGB::DarkMagenta;
-  } else if (strcmp(availability, "DoNotDisturb") == 0) {
+  } else if (strcmp(availability, "Busy") == 0 || strcmp(availability, "DoNotDisturb") == 0) {
     return CRGB::Red;
   } else if (strcmp(availability, "BeRightBack") == 0 || strcmp(availability, "Away") == 0) {
     return CRGB::Orange;
@@ -225,13 +215,15 @@ void setup() {
 }
 
 void loop() {
+  Serial.println("\n\nUpdating...");
+
   // Get Status
   const char* availability = getAvailability();
   Serial.print("Availability: "); Serial.println(availability);
 
   // Update Colour
   CRGB colour = getAvailabilityColour(availability);
-  setLED(colour);
+  setLEDColour(colour);
 
-  delay(5000);
+  delay(UPDATE_FREQUENCY * 1000); // Seconds to ms conversion
 }
