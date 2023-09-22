@@ -14,6 +14,8 @@ HTTPClient httpClient;
 
 char* accessToken = nullptr;
 
+void(* resetFunc) (void) = 0;
+
 /** OAuth Start **/
 char* getOAuthToken(bool reAuth = false) {
   // TODO Check we have wifi
@@ -45,6 +47,7 @@ char* getOAuthToken(bool reAuth = false) {
 
   if (!doc) {
     Serial.println("Failed to parse JSON response");
+    resetFunc();
     return nullptr;
   }
 
@@ -127,6 +130,7 @@ char* getUserPresence() {
 
   if (!doc) {
     Serial.println("Failed to parse response");
+    resetFunc();
     return nullptr;
   }
 
